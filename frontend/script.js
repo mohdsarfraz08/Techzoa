@@ -43,17 +43,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 1. Populate Dropdown (if empty)
     if (stateSelect.options.length === 0) {
-      data.forEach(s => {
+      // Group by type for cleaner UI
+      const states = data.filter(d => d.type === "state");
+      const cities = data.filter(d => d.type === "city");
+
+      // Add States
+      const stateGroup = document.createElement("optgroup");
+      stateGroup.label = "States";
+      states.forEach(s => {
         const opt = document.createElement("option");
-        opt.value = s.state;
-        opt.innerText = s.state;
-        stateSelect.appendChild(opt);
+        opt.value = s.name;
+        opt.innerText = s.name;
+        stateGroup.appendChild(opt);
       });
-      // Default selection
-      stateSelect.value = data[0].state;
+      stateSelect.appendChild(stateGroup);
+
+      // Add Cities
+      const cityGroup = document.createElement("optgroup");
+      cityGroup.label = "Cities";
+      cities.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.name;
+        opt.innerText = c.name;
+        cityGroup.appendChild(opt);
+      });
+      stateSelect.appendChild(cityGroup);
+
+      // Default selection (First City if available, else First State)
+      stateSelect.value = cities.length > 0 ? cities[0].name : states[0].name;
 
       stateSelect.addEventListener("change", () => {
-        const selected = data.find(s => s.state === stateSelect.value);
+        const selected = data.find(s => s.name === stateSelect.value);
         if (selected) renderStateDetails(selected);
       });
     }
@@ -67,13 +87,13 @@ document.addEventListener("DOMContentLoaded", () => {
     highRisk.forEach((s, i) => {
       const li = document.createElement("li");
       li.innerHTML = `
-        <strong>${s.state}</strong> 
+        <strong>${s.name}</strong> 
         <span class="badge ${s.severity}" style="transform:scale(0.8)">${s.severity}</span>
         <small style="color:var(--text-secondary)">Prob: ${(s.probability * 100).toFixed(0)}%</small>
       `;
       li.style.cursor = "pointer";
       li.onclick = () => {
-        stateSelect.value = s.state;
+        stateSelect.value = s.name;
         renderStateDetails(s);
       };
       priorityList.appendChild(li);
@@ -121,51 +141,91 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const svgContainer = document.getElementById("mapContainer");
-    if (svgContainer) { // svg is inline now
-      data.forEach(s => {
-        const id = stateMap[s.state] || s.state.replace(/ /g, "_");
-        const el = document.getElementById(id); // Look in entire document since it's inline
+    const svgEl = svgContainer ? svgContainer.querySelector("svg") : null;
 
-        if (el) {
-          let color = "#22c55e"; // Low (Green)
-          if (s.severity === "MEDIUM") color = "#eab308"; // Yellow
-          if (s.severity === "HIGH") color = "#ef4444"; // Red (High)
+    if (svgEl) {
+      // 1. CLEAR EXISTING CITY DOTS (if any)
+      const existingDots = svgEl.querySelectorAll(".city-dot");
+      existingDots.forEach(dot => dot.remove());
 
-          // Since it's inline SVG, 'el' is the path itself or group
-          // If it's a group <g>, try to find path inside, else color the element
-          const target = el.tagName === 'path' ? el : (el.querySelector("path") || el);
+      data.forEach(item => {
+        if (item.type === "state") {
+          // Process States
+          const id = stateMap[item.name] || item.name.replace(/ /g, "_");
+          const el = document.getElementById(id); // Look in entire document since it's inline
 
-          target.style.fill = color;
+          if (el) {
+            let color = "#22c55e"; // Low (Green)
+            if (item.severity === "MEDIUM") color = "#eab308"; // Yellow
+            if (item.severity === "HIGH") color = "#ef4444"; // Red (High)
 
-          // Add click listener
-          el.onclick = () => {
-            stateSelect.value = s.state;
-            renderStateDetails(s);
+            // Since it's inline SVG, 'el' is the path itself or group
+            // If it's a group <g>, try to find path inside, else color the element
+            const target = el.tagName === 'path' ? el : (el.querySelector("path") || el);
+
+            target.style.fill = color;
+
+            // Add click listener
+            el.onclick = () => {
+              stateSelect.value = item.name;
+              renderStateDetails(item);
+            }
           }
+        } else if (item.type === "city") {
+          // Process Cities
+          const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          circle.setAttribute("cx", item.x);
+          circle.setAttribute("cy", item.y);
+          circle.setAttribute("r", item.severity === "HIGH" ? "8" : "5");
+          circle.setAttribute("class", `city-dot ${item.severity}`);
+
+          let fill = "#3b82f6"; // Default Blue for cities
+          if (item.severity === "MEDIUM") fill = "#f59e0b";
+          if (item.severity === "HIGH") fill = "#dc2626";
+
+          circle.style.fill = fill;
+          circle.style.stroke = "#fff";
+          circle.style.strokeWidth = "2";
+          circle.style.cursor = "pointer";
+
+          // Animation for high risk
+          if (item.severity === "HIGH") {
+            circle.innerHTML = `<animate attributeName="r" values="8;12;8" dur="1.5s" repeatCount="indefinite" />
+             <animate attributeName="opacity" values="1;0.6;1" dur="1.5s" repeatCount="indefinite" />`;
+          }
+
+          circle.onclick = (e) => {
+            e.stopPropagation(); // Prevent state click
+            stateSelect.value = item.name;
+            renderStateDetails(item);
+          };
+
+          // Append to SVG
+          svgEl.appendChild(circle);
         }
       });
     }
 
     // 4. Update Current View
-    const currentName = stateSelect.value || data[0].state;
-    const currentState = data.find(s => s.state === currentName);
-    if (currentState) {
-      renderStateDetails(currentState);
-      updateCharts(currentState);
+    const currentName = stateSelect.value || data[0].name;
+    const currentItem = data.find(s => s.name === currentName);
+    if (currentItem) {
+      renderStateDetails(currentItem);
+      updateCharts(currentItem);
     }
 
     // 5. Global Alert
     const critical = data.find(s => s.severity === "HIGH");
     if (critical) {
       alertBox.classList.remove("hidden");
-      alertRegion.innerText = critical.state;
+      alertRegion.innerText = critical.name + (critical.type === "city" ? " (City)" : "");
     } else {
       alertBox.classList.add("hidden");
     }
   }
 
   function renderStateDetails(s) {
-    els.region.innerText = s.state;
+    els.region.innerText = s.name;
     els.risk.innerText = s.severity;
     els.risk.className = "badge " + s.severity;
     els.prob.innerText = (s.probability * 100).toFixed(0);
